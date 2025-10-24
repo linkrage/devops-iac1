@@ -1,0 +1,44 @@
+locals {
+  root   = read_terragrunt_config(find_in_parent_folders("root.hcl"))
+  parent = local.root.locals
+}
+
+dependency "bootstrap" {
+  config_path = "../../bootstrap"
+  mock_outputs = {
+    state_bucket_name         = local.parent.state_bucket_name
+    state_lock_table_name     = local.parent.state_lock_table_name
+    permissions_boundary_arn  = ""
+  }
+  mock_outputs_allowed_terraform_commands = ["validate", "fmt", "plan", "terragrunt-info"]
+}
+
+remote_state {
+  backend = "s3"
+  config = merge(
+    {
+      bucket = dependency.bootstrap.outputs.state_bucket_name
+      key    = "staging/ec2-app.tfstate"
+      region = local.parent.aws_region
+      encrypt = true
+    },
+    dependency.bootstrap.outputs.state_lock_table_name != "" ? {
+      dynamodb_table = dependency.bootstrap.outputs.state_lock_table_name
+    } : {}
+  )
+}
+
+terraform {
+  source = "../../infra/aws/ec2-app"
+}
+
+inputs = {
+  aws_region                 = local.parent.aws_region
+  project_name               = local.parent.project
+  environment                = local.parent.environment
+  permissions_boundary_name  = local.parent.permissions_boundary_name
+  cluster_admin_role_name    = local.parent.terraform_deploy_role_name
+  runtime_s3_bucket_name     = local.parent.runtime_config_bucket_name
+  runtime_ssm_parameter_prefix = local.parent.runtime_ssm_parameter_prefix
+  ami_id                     = "ami-REPLACE_ME"
+}

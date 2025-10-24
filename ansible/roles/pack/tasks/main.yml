@@ -1,0 +1,115 @@
+---
+- name: Ensure repositories are current
+  ansible.builtin.dnf:
+    name: "*"
+    state: latest
+
+- name: Install required packages
+  ansible.builtin.dnf:
+    name:
+      - nginx
+      - python3
+      - python3-pip
+      - ansible-core
+      - amazon-ssm-agent
+    state: present
+
+- name: Create nginx configuration directory
+  ansible.builtin.file:
+    path: /etc/nginx/conf.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Deploy nginx main configuration
+  ansible.builtin.template:
+    src: nginx.conf.j2
+    dest: /etc/nginx/nginx.conf
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Deploy default site content
+  ansible.builtin.template:
+    src: index.html.j2
+    dest: /usr/share/nginx/html/index.html
+    owner: nginx
+    group: nginx
+    mode: "0644"
+
+- name: Ensure runtime directory exists
+  ansible.builtin.file:
+    path: /opt/runtime
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Ensure runtime roles directory exists
+  ansible.builtin.file:
+    path: /opt/runtime/roles
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Copy fry role for runtime execution
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/roles/fry"
+    dest: /opt/runtime/roles/
+    owner: root
+    group: root
+    mode: preserve
+
+- name: Place runtime playbook
+  ansible.builtin.template:
+    src: runtime.yml.j2
+    dest: /opt/runtime/runtime.yml
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Create runtime variable file directory
+  ansible.builtin.file:
+    path: /opt/runtime/vars
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Seed runtime variable file
+  ansible.builtin.template:
+    src: runtime_vars.yml.j2
+    dest: /opt/runtime/vars/runtime.yml
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Ensure ansible configuration directory exists
+  ansible.builtin.file:
+    path: /etc/ansible
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Deploy ansible configuration
+  ansible.builtin.template:
+    src: ansible.cfg.j2
+    dest: /etc/ansible/ansible.cfg
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Enable nginx
+  ansible.builtin.systemd:
+    name: nginx
+    enabled: true
+    state: started
+
+- name: Ensure amazon ssm agent running
+  ansible.builtin.systemd:
+    name: amazon-ssm-agent
+    enabled: true
+    state: started

@@ -1,0 +1,6 @@
+---
+- name: Bake nginx image
+  hosts: localhost
+  become: true
+  roles:
+    - role: pack

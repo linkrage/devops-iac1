@@ -1,0 +1,6 @@
+apiVersion: v2
+name: nginx-runtime
+description: Nginx deployment used for EKS exercise
+type: application
+version: 1.0.0
+appVersion: "1.27.3"

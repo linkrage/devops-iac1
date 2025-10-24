@@ -1,0 +1,21 @@
+#!/bin/bash
+set -euo pipefail
+
+mkdir -p /opt/runtime/vars
+chown root:root /opt/runtime/vars
+if [ -d /opt/runtime ]; then
+  chmod 755 /opt/runtime
+fi
+chmod 755 /opt/runtime/vars
+
+cat <<EOF >/opt/runtime/vars/runtime.yml
+runtime_banner: "${runtime_banner}"
+runtime_color: "${runtime_color}"
+EOF
+
+export ANSIBLE_ROLES_PATH=/opt/runtime/roles
+export ANSIBLE_STDOUT_CALLBACK=default
+
+/usr/bin/ansible-playbook /opt/runtime/runtime.yml >> /var/log/ansible-runtime.log 2>&1
+/usr/bin/systemctl restart nginx >> /var/log/ansible-runtime.log 2>&1
+/usr/bin/systemctl status nginx >> /var/log/ansible-runtime.log 2>&1 || true

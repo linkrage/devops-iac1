@@ -1,0 +1,115 @@
+name: deploy
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  HELM_CHART_DIR: apps/helm/nginx
+  AWS_DEFAULT_REGION: us-west-2
+  PROJECT_NAME: a-small-ec2-app
+  ENVIRONMENT: staging
+
+jobs:
+  helm:
+    runs-on: ubuntu-latest
+    environment: staging
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-west-2' }}
+      EKS_CLUSTER_NAME: ${{ vars.EKS_CLUSTER_NAME }}
+      HELM_RELEASE_NAME: ${{ vars.HELM_RELEASE_NAME || 'nginx' }}
+      HELM_NAMESPACE: ${{ vars.HELM_NAMESPACE || 'web' }}
+      HELM_VALUES_FILE: ${{ vars.HELM_VALUES_FILE || 'apps/helm/nginx/values.yaml' }}
+      HELM_ADDITIONAL_ARGS: ${{ vars.HELM_ADDITIONAL_ARGS }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate configuration
+        run: |
+          if [ -z "$EKS_CLUSTER_NAME" ]; then
+            echo "ERROR: EKS_CLUSTER_NAME is not set."
+            echo "Set EKS_CLUSTER_NAME as a repository variable."
+            exit 1
+          fi
+          echo "Using EKS cluster: $EKS_CLUSTER_NAME"
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.TERRAFORM_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-helm
+
+      - name: Configure kubectl
+        run: |
+          aws eks update-kubeconfig --name "$EKS_CLUSTER_NAME" --region "$AWS_REGION"
+
+      - name: Check AWS Load Balancer Controller
+        run: |
+          if ! kubectl get deployment -n kube-system aws-load-balancer-controller &>/dev/null; then
+            echo "WARNING: AWS Load Balancer Controller not installed."
+            echo "The ingress will not provision an ALB without the controller."
+            echo "Install it manually or the ingress will remain pending."
+            echo "See README.md for installation instructions."
+          else
+            echo "AWS Load Balancer Controller is installed."
+          fi
+
+      - name: Helm lint
+        run: |
+          helm lint "$HELM_CHART_DIR"
+
+      - name: Render manifests
+        run: |
+          helm template "$HELM_RELEASE_NAME" "$HELM_CHART_DIR" \
+            --namespace "$HELM_NAMESPACE" \
+            --values "$HELM_VALUES_FILE" \
+            $HELM_ADDITIONAL_ARGS > rendered.yaml
+
+      - name: Upload manifests
+        uses: actions/upload-artifact@v4
+        with:
+          name: helm-manifests
+          path: rendered.yaml
+          retention-days: 7
+
+      - name: Helm upgrade
+        run: |
+          helm upgrade --install "$HELM_RELEASE_NAME" "$HELM_CHART_DIR" \
+            --namespace "$HELM_NAMESPACE" \
+            --values "$HELM_VALUES_FILE" \
+            --create-namespace \
+            $HELM_ADDITIONAL_ARGS
+
+      - name: Wait for rollout
+        run: |
+          kubectl rollout status deployment/"$HELM_RELEASE_NAME"-nginx-runtime \
+            --namespace "$HELM_NAMESPACE" --timeout=300s
+
+      - name: Wait for ingress and get URL
+        run: |
+          echo "Waiting for ingress to be ready..."
+          for i in {1..60}; do
+            INGRESS_URL=$(kubectl get ingress -n "$HELM_NAMESPACE" "$HELM_RELEASE_NAME"-nginx-runtime -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+            if [ -n "$INGRESS_URL" ]; then
+              echo "EKS Public URL: http://$INGRESS_URL"
+              echo "eks_public_url=http://$INGRESS_URL" >> $GITHUB_OUTPUT
+              break
+            fi
+            echo "Waiting for ALB to be provisioned... ($i/60)"
+            sleep 10
+          done
+          if [ -z "$INGRESS_URL" ]; then
+            echo "Warning: Ingress URL not available yet. ALB may still be provisioning."
+            echo "Run: kubectl get ingress -n $HELM_NAMESPACE"
+          fi

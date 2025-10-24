@@ -1,0 +1,7 @@
+---
+- name: Apply runtime configuration
+  hosts: localhost
+  connection: local
+  become: true
+  roles:
+    - role: fry

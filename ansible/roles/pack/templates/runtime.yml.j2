@@ -1,0 +1,9 @@
+---
+- name: Apply runtime configuration
+  hosts: localhost
+  connection: local
+  become: true
+  vars_files:
+    - /opt/runtime/vars/runtime.yml
+  roles:
+    - fry

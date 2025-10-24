@@ -1,0 +1,4 @@
+---
+pack_banner: "Packer baked service"
+pack_build_id: "{{ lookup('env', 'GIT_COMMIT') | default('dev', true) }}"
+pack_color: "#0ea5e9"

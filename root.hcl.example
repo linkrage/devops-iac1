@@ -1,0 +1,17 @@
+locals {
+  account_id                 = "000000000000"
+  aws_region                 = "us-west-2"
+  project                    = "a-small-ec2-app"
+  environment                = "staging"
+  state_bucket_name          = "${local.project}-${local.environment}-tf-state"
+  state_lock_table_name      = "${local.project}-${local.environment}-tf-locks"
+  terraform_deploy_role_name = "terraform-deploy-role"
+  permissions_boundary_name  = "terraform-managed-permissions-boundary"
+  github_org                 = "example-org"
+  github_repo                = "devops"
+  github_ref                 = "refs/heads/main"
+  sso_admin_role_name        = ""
+  runtime_config_bucket_name = ""
+  runtime_ssm_parameter_prefix = ""
+  use_existing_bootstrap_resources = false
+}
