@@ -3,7 +3,7 @@
 
 locals {
   manage_bootstrap_resources = true  # Always manage bootstrap resources
-  check_existing             = var.use_existing_bootstrap_resources
+  check_existing             = true  # Always check for existing resources to enable automatic use
 }
 
 data "external" "s3_bucket_check" {
