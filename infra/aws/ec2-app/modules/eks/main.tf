@@ -22,10 +22,36 @@ data "aws_iam_role" "node" {
   name  = var.node_iam_role_name
 }
 
+# Cleanup existing EKS cluster IAM role to allow fresh creation
+resource "terraform_data" "cleanup_cluster_role" {
+  count = var.cluster_iam_role_name == null && var.manage_cluster ? 1 : 0
+
+  triggers_replace = {
+    role_name = "${var.cluster_name}-cluster-role"
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      # Detach all managed policies from role
+      for policy_arn in $(aws iam list-attached-role-policies --role-name ${var.cluster_name}-cluster-role --query 'AttachedPolicies[].PolicyArn' --output text 2>/dev/null || echo ""); do
+        [ -n "$policy_arn" ] && aws iam detach-role-policy --role-name ${var.cluster_name}-cluster-role --policy-arn $policy_arn 2>/dev/null || true
+      done
+      # Delete inline policies
+      for policy_name in $(aws iam list-role-policies --role-name ${var.cluster_name}-cluster-role --query 'PolicyNames[]' --output text 2>/dev/null || echo ""); do
+        [ -n "$policy_name" ] && aws iam delete-role-policy --role-name ${var.cluster_name}-cluster-role --policy-name $policy_name 2>/dev/null || true
+      done
+      # Delete the role
+      aws iam delete-role --role-name ${var.cluster_name}-cluster-role 2>/dev/null || true
+    EOT
+  }
+}
+
 resource "aws_iam_role" "cluster" {
   count                = var.cluster_iam_role_name == null && var.manage_cluster ? 1 : 0
   name                 = "${var.cluster_name}-cluster-role"
   permissions_boundary = var.permissions_boundary_arn
+
+  depends_on = [terraform_data.cleanup_cluster_role]
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -116,10 +142,41 @@ resource "aws_security_group_rule" "nodes_egress_all" {
   cidr_blocks       = ["0.0.0.0/0"]
 }
 
+# Cleanup existing EKS node IAM role to allow fresh creation
+resource "terraform_data" "cleanup_node_role" {
+  count = var.node_iam_role_name == null ? 1 : 0
+
+  triggers_replace = {
+    role_name = "${var.cluster_name}-node-role"
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      # Detach all managed policies from role
+      for policy_arn in $(aws iam list-attached-role-policies --role-name ${var.cluster_name}-node-role --query 'AttachedPolicies[].PolicyArn' --output text 2>/dev/null || echo ""); do
+        [ -n "$policy_arn" ] && aws iam detach-role-policy --role-name ${var.cluster_name}-node-role --policy-arn $policy_arn 2>/dev/null || true
+      done
+      # Delete inline policies
+      for policy_name in $(aws iam list-role-policies --role-name ${var.cluster_name}-node-role --query 'PolicyNames[]' --output text 2>/dev/null || echo ""); do
+        [ -n "$policy_name" ] && aws iam delete-role-policy --role-name ${var.cluster_name}-node-role --policy-name $policy_name 2>/dev/null || true
+      done
+      # Remove role from instance profiles and delete profiles
+      for profile in $(aws iam list-instance-profiles-for-role --role-name ${var.cluster_name}-node-role --query 'InstanceProfiles[].InstanceProfileName' --output text 2>/dev/null || echo ""); do
+        [ -n "$profile" ] && aws iam remove-role-from-instance-profile --instance-profile-name $profile --role-name ${var.cluster_name}-node-role 2>/dev/null || true
+        [ -n "$profile" ] && aws iam delete-instance-profile --instance-profile-name $profile 2>/dev/null || true
+      done
+      # Delete the role
+      aws iam delete-role --role-name ${var.cluster_name}-node-role 2>/dev/null || true
+    EOT
+  }
+}
+
 resource "aws_iam_role" "node" {
   count                = var.node_iam_role_name == null ? 1 : 0
   name                 = "${var.cluster_name}-node-role"
   permissions_boundary = var.permissions_boundary_arn
+
+  depends_on = [terraform_data.cleanup_node_role]
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -387,11 +444,67 @@ data "aws_iam_policy_document" "lb_controller_assume" {
   }
 }
 
+# Cleanup existing LB controller IAM role to allow fresh creation
+resource "terraform_data" "cleanup_lb_controller_role" {
+  triggers_replace = {
+    role_name = "${var.cluster_name}-lb-controller-role"
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      # Detach all managed policies from role
+      for policy_arn in $(aws iam list-attached-role-policies --role-name ${var.cluster_name}-lb-controller-role --query 'AttachedPolicies[].PolicyArn' --output text 2>/dev/null || echo ""); do
+        [ -n "$policy_arn" ] && aws iam detach-role-policy --role-name ${var.cluster_name}-lb-controller-role --policy-arn $policy_arn 2>/dev/null || true
+      done
+      # Delete inline policies
+      for policy_name in $(aws iam list-role-policies --role-name ${var.cluster_name}-lb-controller-role --query 'PolicyNames[]' --output text 2>/dev/null || echo ""); do
+        [ -n "$policy_name" ] && aws iam delete-role-policy --role-name ${var.cluster_name}-lb-controller-role --policy-name $policy_name 2>/dev/null || true
+      done
+      # Delete the role
+      aws iam delete-role --role-name ${var.cluster_name}-lb-controller-role 2>/dev/null || true
+    EOT
+  }
+}
+
 resource "aws_iam_role" "lb_controller" {
   name                 = "${var.cluster_name}-lb-controller-role"
   assume_role_policy   = data.aws_iam_policy_document.lb_controller_assume.json
   permissions_boundary = var.permissions_boundary_arn
   tags                 = local.tags
+
+  depends_on = [terraform_data.cleanup_lb_controller_role]
+}
+
+# Cleanup existing LB controller IAM policy to allow fresh creation
+resource "terraform_data" "cleanup_lb_controller_policy" {
+  triggers_replace = {
+    policy_name = "${var.cluster_name}-AWSLoadBalancerControllerIAMPolicy"
+    account_id  = data.aws_caller_identity.current.account_id
+    version     = "v2" # Increment to force cleanup to run again
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      # Get policy ARN
+      policy_arn="arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/${var.cluster_name}-AWSLoadBalancerControllerIAMPolicy"
+      # Detach from all attached entities
+      for entity_arn in $(aws iam list-entities-for-policy --policy-arn $policy_arn --query 'PolicyRoles[].RoleName' --output text 2>/dev/null || echo ""); do
+        [ -n "$entity_arn" ] && aws iam detach-role-policy --role-name $entity_arn --policy-arn $policy_arn 2>/dev/null || true
+      done
+      for entity_arn in $(aws iam list-entities-for-policy --policy-arn $policy_arn --query 'PolicyUsers[].UserName' --output text 2>/dev/null || echo ""); do
+        [ -n "$entity_arn" ] && aws iam detach-user-policy --user-name $entity_arn --policy-arn $policy_arn 2>/dev/null || true
+      done
+      for entity_arn in $(aws iam list-entities-for-policy --policy-arn $policy_arn --query 'PolicyGroups[].GroupName' --output text 2>/dev/null || echo ""); do
+        [ -n "$entity_arn" ] && aws iam detach-group-policy --group-name $entity_arn --policy-arn $policy_arn 2>/dev/null || true
+      done
+      # Delete all non-default versions
+      for version in $(aws iam list-policy-versions --policy-arn $policy_arn --query 'Versions[?!IsDefaultVersion].VersionId' --output text 2>/dev/null || echo ""); do
+        [ -n "$version" ] && aws iam delete-policy-version --policy-arn $policy_arn --version-id $version 2>/dev/null || true
+      done
+      # Delete the policy
+      aws iam delete-policy --policy-arn $policy_arn 2>/dev/null || true
+    EOT
+  }
 }
 
 resource "aws_iam_policy" "lb_controller" {
@@ -399,6 +512,8 @@ resource "aws_iam_policy" "lb_controller" {
   description = "IAM policy for AWS Load Balancer Controller"
   policy      = file("${path.module}/lb_controller_policy.json")
   tags        = local.tags
+
+  depends_on = [terraform_data.cleanup_lb_controller_policy]
 }
 
 resource "aws_iam_role_policy_attachment" "lb_controller" {
@@ -418,24 +533,40 @@ resource "kubernetes_service_account_v1" "lb_controller" {
   depends_on = [aws_eks_node_group.default]
 }
 
-resource "helm_release" "lb_controller" {
-  provider   = helm
-  name       = "aws-load-balancer-controller"
-  repository = "https://aws.github.io/eks-charts"
-  chart      = "aws-load-balancer-controller"
-  namespace  = "kube-system"
-  version    = "1.7.0"
+# Install AWS Load Balancer Controller via Helm CLI
+# This approach is more reliable than helm provider with dynamic cluster configuration
+resource "null_resource" "lb_controller_install" {
+  triggers = {
+    cluster_endpoint = local.cluster_endpoint
+    cluster_name     = local.cluster_name
+    version          = "1.7.0"
+  }
 
-  values = [
-    yamlencode({
-      clusterName = local.cluster_name
-      serviceAccount = {
-        create = false
-        name   = "aws-load-balancer-controller"
-      }
-      vpcId = var.vpc_id
-    })
-  ]
+  provisioner "local-exec" {
+    command = <<-EOT
+      # Update kubeconfig for the EKS cluster
+      aws eks update-kubeconfig --name ${local.cluster_name} --region ${var.region} --alias ${local.cluster_name}
+      
+      # Add helm repo if not already added
+      helm repo add eks https://aws.github.io/eks-charts 2>/dev/null || true
+      helm repo update
+      
+      # Install or upgrade the AWS Load Balancer Controller
+      helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-controller \
+        --namespace kube-system \
+        --version 1.7.0 \
+        --set clusterName=${local.cluster_name} \
+        --set serviceAccount.create=false \
+        --set serviceAccount.name=aws-load-balancer-controller \
+        --set region=${var.region} \
+        --set vpcId=${var.vpc_id} \
+        --wait
+    EOT
+
+    environment = {
+      AWS_DEFAULT_REGION = var.region
+    }
+  }
 
   depends_on = [
     kubernetes_service_account_v1.lb_controller,

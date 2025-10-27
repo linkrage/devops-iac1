@@ -128,3 +128,8 @@ variable "logs_kms_key_id" {
   type        = string
   default     = null
 }
+
+variable "region" {
+  description = "AWS region for EKS cluster"
+  type        = string
+}

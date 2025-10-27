@@ -150,6 +150,7 @@ module "eks" {
   kms_key_arn                           = module.kms.eks_key_arn
   ebs_kms_key_id                        = module.kms.ebs_key_id
   logs_kms_key_id                       = module.kms.logs_key_id
+  region                                = var.aws_region
   tags                                  = local.common_tags
 }
 
