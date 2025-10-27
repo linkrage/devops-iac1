@@ -46,6 +46,7 @@ cd ..
 cd live/staging
 cp terragrunt.hcl.example terragrunt.hcl
 # Edit terragrunt.hcl and set ami_id from step 3
+# Optional: Enable HTTPS by adding domain name & Route53 zone ID
 terragrunt apply
 cd ../..
 
@@ -65,8 +66,9 @@ helm upgrade --install nginx apps/helm/nginx \
 --create-namespace
 
 # 6. Get public URLs
-echo -e "\nEC2 App: http://$(cd live/staging && terragrunt output -raw alb_dns_name 2>/dev/null)"
+echo -e "\nEC2 App: $(cd live/staging && terragrunt output -raw alb_public_url 2>/dev/null)"
 echo -e "\nEKS App: http://$(kubectl get ingress -n web nginx-nginx-runtime -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')"
+# Note: alb_public_url automatically shows https:// if HTTPS is enabled
 ```
 
 ## Day-2 Operations
@@ -164,6 +166,40 @@ kubectl get ingress -n web nginx-nginx-runtime
 - Target group with health checks (path: /)
 - Cross-zone load balancing enabled
 
+**SSL/TLS Configuration (Optional - Bonus Feature):**
+
+The project supports **three HTTPS options**:
+
+1. **No HTTPS (Default)** - HTTP only for demos/testing
+2. **Manual Certificate** - Provide existing ACM certificate ARN
+3. **Automatic Certificate** - Terraform creates & validates ACM cert via Route53
+
+**Quick HTTPS Setup (if you have a domain):**
+
+```hcl
+# Edit live/staging/terragrunt.hcl
+inputs = {
+  enable_https    = true
+  acm_domain_name = "app.example.com"  # Your domain
+  route53_zone_id = "Z1234567890"      # Your Route53 zone ID
+  # ... other inputs
+}
+```
+
+Then run: `terragrunt apply`
+
+**What happens automatically:**
+- ACM certificate created
+- DNS validation records added to Route53
+- Certificate validated (1-5 minutes)
+- ALB HTTPS listener configured with TLS 1.3
+- HTTP → HTTPS redirect enabled
+
+**Certificate Details:**
+- TLS Policy: `ELBSecurityPolicy-TLS13-1-2-2021-06` (modern & secure)
+
+**Full Guide:** [SSL_CERTIFICATE_SETUP.md](SSL_CERTIFICATE_SETUP.md)
+
 **Security:**
 - ALB Security Group: Allow 0.0.0.0/0 on ports 80/443
 - Instance Security Group:
@@ -201,6 +237,13 @@ All KMS keys have:
 - 30-day deletion window
 - Comprehensive key policies with least privilege
 - Service principal and role-based access
+
+**TLS/SSL Encryption:**
+- Optional ACM certificate for HTTPS (TLS 1.3, TLS 1.2)
+- Automatic certificate creation & DNS validation via Route53
+- TLS termination at Application Load Balancer
+- Free ACM certificates with automatic renewal
+- HTTP → HTTPS redirect when enabled
 
 
 # Architecture Diagrams
@@ -266,6 +309,11 @@ graph TB
             EKS_NODE_ROLE[EKS Node Role]
             LBC_ROLE[Load Balancer Controller Role]
         end
+
+        subgraph "Security & Certificates"
+            ACM[ACM Certificate<br/>Optional Auto-Created]
+            R53[Route53<br/>DNS Validation]
+        end
     end
 
     subgraph "GitHub"
@@ -319,8 +367,12 @@ graph TB
     POD2 --> EKS_NODE_ROLE
     EKS_ALB --> LBC_ROLE
 
+    ALB -.TLS Certificate.-> ACM
+    ACM -.DNS Validation.-> R53
+
     style ALB fill:#f96,stroke:#333,stroke-width:2px
     style EKS_ALB fill:#f96,stroke:#333,stroke-width:2px
+    style ACM fill:#fc9,stroke:#333,stroke-width:2px
     style EC2A fill:#9cf,stroke:#333,stroke-width:2px
     style EC2B fill:#9cf,stroke:#333,stroke-width:2px
     style POD1 fill:#9f9,stroke:#333,stroke-width:2px
@@ -384,18 +436,20 @@ graph LR
     style NATB fill:#ff9,stroke:#333,stroke-width:2px
 ```
 
-## Security Groups
+## Security Groups & TLS
 
 ```mermaid
 graph TD
-    subgraph "Security Groups"
+    subgraph "Security & Traffic Flow"
         Internet[Internet<br/>0.0.0.0/0]
+        ACM[ACM Certificate<br/>Optional]
 
         ALB_SG[ALB Security Group]
         INST_SG[Instance Security Group]
 
         Internet -->|HTTP 80<br/>HTTPS 443| ALB_SG
         Internet -->|SSH 22| INST_SG
+        ACM -.TLS Termination.-> ALB_SG
         ALB_SG -->|HTTP 80| INST_SG
         INST_SG -->|All Traffic| INST_SG
         INST_SG -->|All Traffic<br/>Egress| Internet
@@ -403,6 +457,7 @@ graph TD
 
     style ALB_SG fill:#f96,stroke:#333,stroke-width:2px
     style INST_SG fill:#9cf,stroke:#333,stroke-width:2px
+    style ACM fill:#fc9,stroke:#333,stroke-width:2px
 ```
 
 ## KMS Encryption Architecture
@@ -616,12 +671,12 @@ graph TB
 
 ## Legend
 
-- 🔵 Blue: EC2 Instances
-- 🟢 Green: Kubernetes Pods
-- 🔴 Red: Load Balancers
-- 🟡 Yellow: NAT Gateways
-- 🟠 Orange: KMS Keys
-- Dashed lines: Encryption relationships
+- Blue: EC2 Instances
+- Green: Kubernetes Pods
+- Red: Load Balancers
+- Yellow: NAT Gateways
+- Orange: KMS Keys & Certificates
+- Dashed lines: Encryption relationships, TLS termination, DNS validation
 - Solid lines: Network/data flow
 
 ---

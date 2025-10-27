@@ -18,6 +18,17 @@ module "kms" {
   eks_node_role_name   = "${local.eks_cluster_name}-node-role"
 }
 
+# Optional ACM Certificate Module (creates and validates certificate via Route53)
+module "acm" {
+  source = "./modules/acm"
+
+  name_prefix               = local.name_prefix
+  domain_name               = var.acm_domain_name
+  subject_alternative_names = var.acm_subject_alternative_names
+  route53_zone_id           = var.route53_zone_id
+  tags                      = local.common_tags
+}
+
 resource "aws_s3_bucket" "runtime_config" {
   count  = var.runtime_s3_bucket_name != "" ? 1 : 0
   bucket = var.runtime_s3_bucket_name
@@ -97,7 +108,7 @@ module "alb" {
   tags              = local.common_tags
   health_check_path = "/"
   enable_https      = local.https_enabled
-  certificate_arn   = local.https_enabled ? var.alb_certificate_arn : ""
+  certificate_arn   = local.certificate_arn
 }
 
 module "compute" {

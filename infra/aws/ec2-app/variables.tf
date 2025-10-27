@@ -65,7 +65,25 @@ variable "ami_id" {
 
 variable "alb_certificate_arn" {
   type        = string
-  description = "Optional ACM certificate ARN for HTTPS."
+  description = "Optional ACM certificate ARN for HTTPS. If provided, this takes precedence over auto-created certificate."
+  default     = ""
+}
+
+variable "acm_domain_name" {
+  type        = string
+  description = "Domain name for automatic ACM certificate creation (e.g., app.example.com). Leave empty to skip."
+  default     = ""
+}
+
+variable "acm_subject_alternative_names" {
+  type        = list(string)
+  description = "Additional domain names for ACM certificate (e.g., [\"*.example.com\"])"
+  default     = []
+}
+
+variable "route53_zone_id" {
+  type        = string
+  description = "Route53 hosted zone ID for DNS validation. Required if acm_domain_name is provided."
   default     = ""
 }
 

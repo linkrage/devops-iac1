@@ -51,3 +51,23 @@ output "eks_ingress_info" {
   description = "Instructions to get the EKS ingress public URL"
   value       = "Deploy nginx: helm upgrade --install nginx apps/helm/nginx --namespace web --create-namespace -f apps/helm/nginx/values.yaml\nThen run: kubectl get ingress -n web nginx-nginx-runtime -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'"
 }
+
+output "acm_certificate_arn" {
+  description = "ARN of the auto-created ACM certificate (if enabled)"
+  value       = module.acm.certificate_arn
+}
+
+output "acm_certificate_status" {
+  description = "Status of the ACM certificate"
+  value       = module.acm.certificate_status
+}
+
+output "https_enabled" {
+  description = "Whether HTTPS is enabled on the ALB"
+  value       = local.https_enabled
+}
+
+output "certificate_domain" {
+  description = "Domain name of the ACM certificate (if configured)"
+  value       = module.acm.domain_name
+}

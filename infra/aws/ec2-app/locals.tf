@@ -2,7 +2,11 @@ locals {
   name_prefix             = "${var.project_name}-${var.environment}"
   eks_cluster_name        = var.eks_cluster_name != null && var.eks_cluster_name != "" ? var.eks_cluster_name : format("%s-eks-%s", local.name_prefix, replace(var.eks_cluster_version, ".", "-"))
   common_tags             = { Project = var.project_name, Environment = var.environment, ManagedBy = "terraform" }
-  https_enabled           = var.enable_https && var.alb_certificate_arn != ""
+  
+  # Certificate logic: prefer provided ARN, fall back to auto-created, or empty
+  certificate_arn = var.alb_certificate_arn != "" ? var.alb_certificate_arn : module.acm.certificate_arn
+  https_enabled   = var.enable_https && local.certificate_arn != ""
+  
   cluster_admin_role_name = var.cluster_admin_role_name
   permissions_boundary_arn = var.permissions_boundary_name != "" ? format(
     "arn:%s:iam::%s:policy/%s",
