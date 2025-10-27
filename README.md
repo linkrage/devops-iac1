@@ -56,6 +56,13 @@ echo "arn:aws:iam::$(terragrunt output -raw caller_account_id):role/terraform-de
 # Set these in GitHub: Settings > Secrets and variables > Actions > Variables
 # - EKS_CLUSTER_NAME
 # - TERRAFORM_DEPLOY_ROLE_ARN
+# Then git push to main branch to trigger GitHub Actions deployment
+# OR
+# Run this command to deploy the Helm chart to the EKS cluster manually
+helm upgrade --install nginx apps/helm/nginx \
+--namespace web \
+--values apps/helm/nginx/values.yaml \
+--create-namespace
 
 # 6. Get public URLs
 echo -e "\nEC2 App: http://$(cd live/staging && terragrunt output -raw alb_dns_name 2>/dev/null)"
@@ -131,11 +138,12 @@ kubectl get ingress -n web nginx-nginx-runtime
 ### Network Architecture
 
 **VPC Design:**
-- Supernet: 172.16.0.0/16
+- Supernet: /16 CIDR (default: 172.16.0.0/16, configurable)
 - Two Availability Zones for high availability
-- Four subnets per AZ:
-  - Public subnets (172.16.0.0/24, 172.16.1.0/24)
-  - Private subnets (172.16.10.0/24, 172.16.11.0/24)
+- Four subnets total:
+  - 2 Public subnets: /24 each across 2 AZs (default: 172.16.0.0/24, 172.16.1.0/24)
+  - 2 Private subnets: /24 each across 2 AZs (default: 172.16.100.0/24, 172.16.101.0/24)
+  - All subnet CIDRs are configurable via variables
 - NAT Gateway per AZ for private subnet egress
 - Internet Gateway for public subnet ingress/egress
 - VPC Endpoints:
@@ -202,16 +210,16 @@ All KMS keys have:
 ```mermaid
 graph TB
     subgraph "AWS Cloud - us-west-2"
-        subgraph "VPC 172.16.0.0/16"
+        subgraph "VPC (configurable /16 CIDR)"
             subgraph "AZ-A us-west-2a"
-                PubA[Public Subnet<br/>172.16.0.0/24]
-                PrivA[Private Subnet<br/>172.16.10.0/24]
+                PubA[Public Subnet A<br/>/24 CIDR]
+                PrivA[Private Subnet A<br/>/24 CIDR]
                 NATA[NAT Gateway A]
             end
 
             subgraph "AZ-B us-west-2b"
-                PubB[Public Subnet<br/>172.16.1.0/24]
-                PrivB[Private Subnet<br/>172.16.11.0/24]
+                PubB[Public Subnet B<br/>/24 CIDR]
+                PrivB[Private Subnet B<br/>/24 CIDR]
                 NATB[NAT Gateway B]
             end
 
@@ -330,20 +338,20 @@ graph LR
         Users[Internet Users]
     end
 
-    subgraph "VPC 172.16.0.0/16"
+    subgraph "VPC (configurable /16)"
         IGW[Internet Gateway]
 
         subgraph "Public Subnets"
-            PubA[172.16.0.0/24<br/>AZ-A]
-            PubB[172.16.1.0/24<br/>AZ-B]
+            PubA[Public Subnet A<br/>/24 in AZ-A]
+            PubB[Public Subnet B<br/>/24 in AZ-B]
             NATA[NAT GW A]
             NATB[NAT GW B]
             ALB[Application LB]
         end
 
         subgraph "Private Subnets"
-            PrivA[172.16.10.0/24<br/>AZ-A]
-            PrivB[172.16.11.0/24<br/>AZ-B]
+            PrivA[Private Subnet A<br/>/24 in AZ-A]
+            PrivB[Private Subnet B<br/>/24 in AZ-B]
             EC2[EC2 Instances]
             EKS[EKS Nodes]
         end
@@ -356,6 +364,7 @@ graph LR
 
     Users --> IGW
     IGW --> ALB
+    IGW -.SSH.-> EC2
     ALB --> EC2
     EC2 --> NATA
     EC2 --> NATB
