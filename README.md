@@ -158,8 +158,11 @@ kubectl get ingress -n web nginx-nginx-runtime
 
 **Security:**
 - ALB Security Group: Allow 0.0.0.0/0 on ports 80/443
-- Instance Security Group: Allows HTTP traffic (port 80) exclusively from the ALB. No other inbound ports are open.
-- Administrative Access: Managed via AWS SSM Session Manager, which removes the need for SSH keys and open SSH ports.
+- Instance Security Group:
+  - HTTP (port 80) from ALB security group only
+  - SSH (port 22) from 0.0.0.0/0 (configurable via `ssh_ingress_cidrs`)
+  - All outbound traffic allowed
+- Administrative Access: SSH access enabled for direct instance access. AWS SSM Session Manager also available as an alternative.
 
 ### EKS Application Architecture
 
@@ -270,6 +273,8 @@ graph TB
     USER --> IGW
     IGW --> ALB
     IGW --> EKS_ALB
+    IGW -.SSH 22.-> EC2A
+    IGW -.SSH 22.-> EC2B
     ALB --> EC2A
     ALB --> EC2B
     EKS_ALB --> POD1
@@ -381,9 +386,10 @@ graph TD
         INST_SG[Instance Security Group]
 
         Internet -->|HTTP 80<br/>HTTPS 443| ALB_SG
+        Internet -->|SSH 22| INST_SG
         ALB_SG -->|HTTP 80| INST_SG
         INST_SG -->|All Traffic| INST_SG
-        INST_SG -->|HTTPS 443<br/>Egress| Internet
+        INST_SG -->|All Traffic<br/>Egress| Internet
     end
 
     style ALB_SG fill:#f96,stroke:#333,stroke-width:2px

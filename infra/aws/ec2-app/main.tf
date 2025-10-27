@@ -75,6 +75,7 @@ module "security" {
   name_prefix       = local.name_prefix
   vpc_id            = module.network.vpc_id
   alb_ingress_cidrs = ["0.0.0.0/0"]
+  ssh_ingress_cidrs = var.ssh_ingress_cidrs
   tags              = local.common_tags
 }
 

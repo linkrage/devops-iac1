@@ -69,6 +69,12 @@ variable "alb_certificate_arn" {
   default     = ""
 }
 
+variable "ssh_ingress_cidrs" {
+  type        = list(string)
+  description = "CIDR blocks allowed SSH access to EC2 instances. Defaults to open (not recommended for production)."
+  default     = ["0.0.0.0/0"]
+}
+
 variable "enable_https" {
   type        = bool
   description = "Enable HTTPS listener on the ALB if a certificate is provided."
