@@ -1,25 +1,18 @@
 # Packer support resources - ensure default VPC has subnet and IGW
-# This makes the bootstrap handle what cloud-nuke removes
+# Safe checks for idempotency
 
 data "aws_vpc" "default" {
   default = true
 }
 
 # Check for existing IGW in default VPC
-data "aws_internet_gateway" "default_vpc_existing" {
-  count = local.manage_bootstrap_resources ? 1 : 0
+data "external" "igw_check" {
+  count = local.check_existing ? 1 : 0
 
-  filter {
-    name   = "attachment.vpc-id"
-    values = [data.aws_vpc.default.id]
-  }
-
-  lifecycle {
-    postcondition {
-      condition     = self.id != ""
-      error_message = "Internet gateway not found, will be created"
-    }
-  }
+  program = [
+    "bash", "-c",
+    "vpc_id=$(aws ec2 describe-vpcs --filters Name=isDefault,Values=true --region ${var.aws_region} --query 'Vpcs[0].VpcId' --output text 2>/dev/null); igw_id=$(aws ec2 describe-internet-gateways --filters Name=attachment.vpc-id,Values=$vpc_id --region ${var.aws_region} --query 'InternetGateways[0].InternetGatewayId' --output text 2>/dev/null || echo ''); if [ -n \"$igw_id\" ]; then echo '{\"exists\":\"true\",\"id\":\"$igw_id\"}'; else echo '{\"exists\":\"false\"}'; fi"
+  ]
 }
 
 # Check for existing subnet for Packer
@@ -38,7 +31,7 @@ data "aws_subnets" "packer_existing" {
 }
 
 locals {
-  existing_default_vpc_igw    = try(data.aws_internet_gateway.default_vpc_existing[0].id, "")
+  existing_default_vpc_igw    = local.check_existing ? try(data.external.igw_check[0].result.exists == "true" ? data.external.igw_check[0].result.id : "", "") : ""
   existing_packer_subnets     = try(data.aws_subnets.packer_existing[0].ids, [])
 
   create_default_vpc_igw      = local.manage_bootstrap_resources && local.existing_default_vpc_igw == ""

@@ -6,8 +6,6 @@ data "aws_caller_identity" "current" {}
 data "aws_partition" "current" {}
 
 locals {
-  manage_bootstrap_resources = !var.use_existing_bootstrap_resources
-
   kms_alias_names = {
     terraform_state = "alias/${var.project_name}-${var.environment}-terraform-state"
     dynamodb        = "alias/${var.project_name}-${var.environment}-dynamodb"
@@ -26,7 +24,6 @@ locals {
     data.aws_caller_identity.current.account_id
   )
 }
-
 # KMS Key for Terraform State S3 Bucket
 resource "aws_kms_key" "terraform_state" {
   count = local.create_kms_state_key ? 1 : 0
@@ -616,7 +613,9 @@ data "aws_iam_policy_document" "terraform_deploy_inline" {
       "iam:PutRolePolicy",
       "iam:RemoveRoleFromInstanceProfile",
       "iam:TagRole",
+      "iam:TagPolicy",
       "iam:UntagRole",
+      "iam:UntagPolicy",
       "iam:UpdateAssumeRolePolicy",
       "iam:UpdateRole",
       "iam:UpdateRoleDescription",
